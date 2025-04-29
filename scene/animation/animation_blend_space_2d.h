@@ -31,6 +31,7 @@
 #pragma once
 
 #include "scene/animation/animation_tree.h"
+#include "scene/resources/curve.h"
 
 class AnimationNodeBlendSpace2D : public AnimationRootNode {
 	GDCLASS(AnimationNodeBlendSpace2D, AnimationRootNode);
@@ -51,6 +52,8 @@ protected:
 		StringName name;
 		Ref<AnimationRootNode> node;
 		Vector2 position;
+		float weight = 0.0;
+		float velocity_limit = 0.1;
 	};
 
 	BlendPoint blend_points[MAX_BLEND_POINTS];
@@ -70,6 +73,10 @@ protected:
 	String x_label = "x";
 	String y_label = "y";
 	BlendMode blend_mode = BLEND_MODE_INTERPOLATED;
+	bool override_delta = false;
+	bool use_velocity_limit = false;
+	float default_velocity_limit = 0.0;
+	float velocity_limit_curve = 0.0;
 
 	void _add_blend_point(int p_index, const Ref<AnimationRootNode> &p_node);
 	void _set_triangles(const Vector<int> &p_triangles);
@@ -112,6 +119,8 @@ public:
 	void remove_triangle(int p_triangle);
 	int get_triangle_count() const;
 
+	float velocity_limit(float p_start, float p_target, float p_velocity_limit, float p_delta);
+
 	void set_min_space(const Vector2 &p_min);
 	Vector2 get_min_space() const;
 
@@ -141,7 +150,22 @@ public:
 	void set_use_sync(bool p_sync);
 	bool is_using_sync() const;
 
+	void set_blend_point_vl(int p_point, const float &p_velocity_limit);
+	float get_blend_point_vl(int p_point) const;
+
+	void set_use_velocity_limit(bool p_use_velocity_limit);
+	bool get_use_velocity_limit() const;
+
+	void set_velocity_limit(const double &p_default_blend_time);
+	double get_velocity_limit() const;
+
+	void set_override_delta(bool p_override_delta);
+	bool get_override_delta() const;
+
 	virtual Ref<AnimationNode> get_child_by_name(const StringName &p_name) const override;
+
+	void set_velocity_limit_curve(const float p_curve);
+	float get_velocity_limit_curve() const;
 
 	AnimationNodeBlendSpace2D();
 	~AnimationNodeBlendSpace2D();

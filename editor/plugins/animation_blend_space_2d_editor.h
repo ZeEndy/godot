@@ -33,7 +33,9 @@
 #include "editor/plugins/animation_tree_editor_plugin.h"
 #include "editor/plugins/editor_plugin.h"
 #include "scene/animation/animation_blend_space_2d.h"
+#include "scene/gui/dialogs.h"
 #include "scene/gui/graph_edit.h"
+#include "scene/gui/tree.h"
 
 class Button;
 class CheckBox;
@@ -43,8 +45,10 @@ class PanelContainer;
 class SpinBox;
 class VSeparator;
 
+class BlendPointEditor;
 class AnimationNodeBlendSpace2DEditor : public AnimationTreeNodeEditorPlugin {
 	GDCLASS(AnimationNodeBlendSpace2DEditor, AnimationTreeNodeEditorPlugin);
+	friend BlendPointEditor;
 
 	Ref<AnimationNodeBlendSpace2D> blend_space;
 	bool read_only = false;
@@ -60,7 +64,18 @@ class AnimationNodeBlendSpace2DEditor : public AnimationTreeNodeEditorPlugin {
 	SpinBox *snap_x = nullptr;
 	SpinBox *snap_y = nullptr;
 	CheckBox *sync = nullptr;
+
 	OptionButton *interpolation = nullptr;
+
+	HBoxContainer *blending_hb = nullptr;
+	CheckBox *use_velocity_limit = nullptr;
+	SpinBox *default_velocity_limit = nullptr;
+	CheckBox *override_delta = nullptr;
+	Ref<BlendPointEditor> current_blend_point_editor;
+
+	HBoxContainer *edit_fade_hb = nullptr;
+	SpinBox *edit_fade_in = nullptr;
+	SpinBox *edit_fade_out = nullptr;
 
 	Button *auto_triangles = nullptr;
 
@@ -119,6 +134,8 @@ class AnimationNodeBlendSpace2DEditor : public AnimationTreeNodeEditorPlugin {
 	void _erase_selected();
 	void _edit_point_pos(double);
 	void _open_editor();
+	void _delete_curve();
+	void _edit_curve();
 
 	void _auto_triangles_toggled();
 
@@ -145,4 +162,33 @@ public:
 	virtual bool can_edit(const Ref<AnimationNode> &p_node) override;
 	virtual void edit(const Ref<AnimationNode> &p_node) override;
 	AnimationNodeBlendSpace2DEditor();
+	~AnimationNodeBlendSpace2DEditor();
+};
+
+class BlendPointEditor : public RefCounted {
+	GDCLASS(BlendPointEditor, RefCounted);
+
+private:
+	Ref<AnimationNodeBlendSpace2D> blend_space;
+	Ref<AnimationNode> anim_node;
+	float velocity_limit_curve;
+	int selected_point = -1;
+	float velocity_limit;
+	bool updating = false;
+
+public:
+	void setup(Ref<AnimationNodeBlendSpace2D> p_blend_space, int idx, Ref<AnimationNode> p_anim_node);
+
+	void set_velocity_limit(float p_value);
+	double get_velocity_limit() const;
+
+	void _edit_point_velocity_limit();
+	Ref<AnimationNode> get_anim_node() const;
+	void set_velocity_limit_curve(float const p_curve);
+	float get_velocity_limit_curve() const;
+	bool _hide_script_from_inspector() { return true; }
+	bool _hide_metadata_from_inspector() { return true; }
+	bool _dont_undo_redo() { return true; }
+
+	static void _bind_methods();
 };
