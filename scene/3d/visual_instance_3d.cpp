@@ -380,6 +380,16 @@ GeometryInstance3D::ShadowCastingSetting GeometryInstance3D::get_cast_shadows_se
 	return shadow_casting_setting;
 }
 
+void GeometryInstance3D::set_shadow_group_setting(GeometryInstance3D::ShadowGroupSetting p_shadow_group_setting) {
+	shadow_group_setting = p_shadow_group_setting;
+
+	RS::get_singleton()->instance_geometry_set_shadow_group_setting(get_instance(), (RSE::ShadowGroupSetting)p_shadow_group_setting);
+}
+
+GeometryInstance3D::ShadowGroupSetting GeometryInstance3D::get_shadow_group_setting() const {
+	return shadow_group_setting;
+}
+
 void GeometryInstance3D::set_extra_cull_margin(float p_margin) {
 	ERR_FAIL_COND(p_margin < 0);
 	extra_cull_margin = p_margin;
@@ -555,6 +565,9 @@ void GeometryInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cast_shadows_setting", "shadow_casting_setting"), &GeometryInstance3D::set_cast_shadows_setting);
 	ClassDB::bind_method(D_METHOD("get_cast_shadows_setting"), &GeometryInstance3D::get_cast_shadows_setting);
 
+	ClassDB::bind_method(D_METHOD("set_shadow_group_setting", "shadow_group_setting"), &GeometryInstance3D::set_shadow_group_setting);
+	ClassDB::bind_method(D_METHOD("get_shadow_group_setting"), &GeometryInstance3D::get_shadow_group_setting);
+
 	ClassDB::bind_method(D_METHOD("set_lod_bias", "bias"), &GeometryInstance3D::set_lod_bias);
 	ClassDB::bind_method(D_METHOD("get_lod_bias"), &GeometryInstance3D::get_lod_bias);
 
@@ -606,6 +619,7 @@ void GeometryInstance3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material_overlay", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial", PROPERTY_USAGE_DEFAULT), "set_material_overlay", "get_material_overlay");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "transparency", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_transparency", "get_transparency");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cast_shadow", PROPERTY_HINT_ENUM, "Off,On,Double-Sided,Shadows Only"), "set_cast_shadows_setting", "get_cast_shadows_setting");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "shadow_group", PROPERTY_HINT_ENUM, "GLOBAL,GLOBAL REP,VIEWMODEL"), "set_shadow_group_setting", "get_shadow_group_setting");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "extra_cull_margin", PROPERTY_HINT_RANGE, "0,16384,0.01,suffix:m"), "set_extra_cull_margin", "get_extra_cull_margin");
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_bias", PROPERTY_HINT_RANGE, "0.001,128,0.001"), "set_lod_bias", "get_lod_bias");
@@ -629,6 +643,10 @@ void GeometryInstance3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_ON);
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_DOUBLE_SIDED);
 	BIND_ENUM_CONSTANT(SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+
+	BIND_ENUM_CONSTANT(SHADOW_GLOBAL);
+	BIND_ENUM_CONSTANT(SHADOW_GLOBAL_REP);
+	BIND_ENUM_CONSTANT(SHADOW_VIEWMODEL);
 
 	BIND_ENUM_CONSTANT(GI_MODE_DISABLED);
 	BIND_ENUM_CONSTANT(GI_MODE_STATIC);

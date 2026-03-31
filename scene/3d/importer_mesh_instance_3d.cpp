@@ -86,6 +86,14 @@ GeometryInstance3D::ShadowCastingSetting ImporterMeshInstance3D::get_cast_shadow
 	return shadow_casting_setting;
 }
 
+void ImporterMeshInstance3D::set_shadow_group_setting(GeometryInstance3D::ShadowGroupSetting p_shadow_casting_setting) {
+	shadow_group_setting = p_shadow_casting_setting;
+}
+
+GeometryInstance3D::ShadowGroupSetting ImporterMeshInstance3D::get_shadow_group_setting() const {
+	return shadow_group_setting;
+}
+
 void ImporterMeshInstance3D::set_visibility_range_begin(float p_dist) {
 	visibility_range_begin = p_dist;
 	update_configuration_warnings();
@@ -146,6 +154,9 @@ void ImporterMeshInstance3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_cast_shadows_setting", "shadow_casting_setting"), &ImporterMeshInstance3D::set_cast_shadows_setting);
 	ClassDB::bind_method(D_METHOD("get_cast_shadows_setting"), &ImporterMeshInstance3D::get_cast_shadows_setting);
+
+	ClassDB::bind_method(D_METHOD("set_shadow_group_setting", "shadow_group_setting"), &ImporterMeshInstance3D::set_shadow_group_setting);
+	ClassDB::bind_method(D_METHOD("get_shadow_group_setting"), &ImporterMeshInstance3D::get_shadow_group_setting);
 
 	ClassDB::bind_method(D_METHOD("set_visibility_range_end_margin", "distance"), &ImporterMeshInstance3D::set_visibility_range_end_margin);
 	ClassDB::bind_method(D_METHOD("get_visibility_range_end_margin"), &ImporterMeshInstance3D::get_visibility_range_end_margin);
