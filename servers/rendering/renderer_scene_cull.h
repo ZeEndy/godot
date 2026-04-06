@@ -276,9 +276,6 @@ public:
 			FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN = (1 << 22),
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
-			FLAG_SHADOW_GLOBAL = (1 << 25),
-			FLAG_SHADOW_GLOBAL_REP = (1 << 26),
-			FLAG_SHADOW_VIEWMODEL = (1 << 27),
 		};
 
 		uint32_t flags = 0;
@@ -423,7 +420,6 @@ public:
 		Vector<RID> materials;
 
 		RSE::ShadowCastingSetting cast_shadows;
-		RSE::ShadowGroupSetting shadow_group;
 
 		uint32_t layer_mask;
 		// Fit in 32 bits.
@@ -1058,8 +1054,6 @@ public:
 
 	virtual void instance_geometry_set_flag(RID p_instance, RSE::InstanceFlags p_flags, bool p_enabled);
 	virtual void instance_geometry_set_cast_shadows_setting(RID p_instance, RSE::ShadowCastingSetting p_shadow_casting_setting);
-	virtual void instance_geometry_set_shadow_group_setting(RID p_instance, RSE::ShadowGroupSetting p_shadow_group_setting);
-
 	virtual void instance_geometry_set_material_override(RID p_instance, RID p_material);
 	virtual void instance_geometry_set_material_overlay(RID p_instance, RID p_material);
 

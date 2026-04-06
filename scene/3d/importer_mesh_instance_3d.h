@@ -45,7 +45,6 @@ class ImporterMeshInstance3D : public Node3D {
 	Vector<Ref<Material>> surface_materials;
 	uint32_t layer_mask = 1;
 	GeometryInstance3D::ShadowCastingSetting shadow_casting_setting = GeometryInstance3D::SHADOW_CASTING_SETTING_ON;
-	GeometryInstance3D::ShadowGroupSetting shadow_group_setting = GeometryInstance3D::SHADOW_GLOBAL;
 	float visibility_range_begin = 0.0;
 	float visibility_range_end = 0.0;
 	float visibility_range_begin_margin = 0.0;
@@ -73,8 +72,6 @@ public:
 
 	void set_cast_shadows_setting(GeometryInstance3D::ShadowCastingSetting p_shadow_casting_setting);
 	GeometryInstance3D::ShadowCastingSetting get_cast_shadows_setting() const;
-	void set_shadow_group_setting(GeometryInstance3D::ShadowGroupSetting p_shadow_casting_setting);
-	GeometryInstance3D::ShadowGroupSetting get_shadow_group_setting() const;
 
 	void set_visibility_range_begin(float p_dist);
 	float get_visibility_range_begin() const;

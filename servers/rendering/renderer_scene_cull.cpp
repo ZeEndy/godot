@@ -1349,33 +1349,6 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 	_instance_queue_update(instance, false, true);
 }
 
-void RendererSceneCull::instance_geometry_set_shadow_group_setting(RID p_instance, RSE::ShadowGroupSetting p_shadow_group_setting) {
-	Instance *instance = instance_owner.get_or_null(p_instance);
-	ERR_FAIL_NULL(instance);
-
-	// Store the new enum in the instance
-	instance->shadow_group = p_shadow_group_setting;
-
-	if (instance->scenario && instance->array_index >= 0) {
-		InstanceData &idata = instance->scenario->instance_data[instance->array_index];
-
-		idata.flags &= ~(InstanceData::FLAG_SHADOW_GLOBAL | InstanceData::FLAG_SHADOW_GLOBAL_REP | InstanceData::FLAG_SHADOW_VIEWMODEL);
-
-		switch (p_shadow_group_setting) {
-			case RSE::SHADOW_GLOBAL: {
-				idata.flags |= InstanceData::FLAG_SHADOW_GLOBAL;
-			} break;
-			case RSE::SHADOW_GLOBAL_REP: {
-				idata.flags |= InstanceData::FLAG_SHADOW_GLOBAL_REP;
-			} break;
-			case RSE::SHADOW_VIEWMODEL: {
-				idata.flags |= InstanceData::FLAG_SHADOW_VIEWMODEL;
-			} break;
-		}
-	}
-	_instance_queue_update(instance, false, true);
-}
-
 void RendererSceneCull::instance_geometry_set_material_override(RID p_instance, RID p_material) {
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);

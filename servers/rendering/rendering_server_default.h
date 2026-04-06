@@ -955,7 +955,6 @@ public:
 
 	FUNC3(instance_geometry_set_flag, RID, RSE::InstanceFlags, bool)
 	FUNC2(instance_geometry_set_cast_shadows_setting, RID, RSE::ShadowCastingSetting)
-	FUNC2(instance_geometry_set_shadow_group_setting, RID, RSE::ShadowGroupSetting)
 	FUNC2(instance_geometry_set_material_override, RID, RID)
 	FUNC2(instance_geometry_set_material_overlay, RID, RID)
 

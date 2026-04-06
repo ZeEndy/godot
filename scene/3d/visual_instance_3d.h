@@ -99,11 +99,6 @@ public:
 		SHADOW_CASTING_SETTING_DOUBLE_SIDED = RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED,
 		SHADOW_CASTING_SETTING_SHADOWS_ONLY = RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY,
 	};
-	enum ShadowGroupSetting {
-		SHADOW_GLOBAL = RSE::SHADOW_GLOBAL,
-		SHADOW_GLOBAL_REP = RSE::SHADOW_GLOBAL_REP,
-		SHADOW_VIEWMODEL = RSE::SHADOW_VIEWMODEL,
-	};
 
 	enum GIMode {
 		GI_MODE_DISABLED,
@@ -127,7 +122,6 @@ public:
 
 private:
 	ShadowCastingSetting shadow_casting_setting = SHADOW_CASTING_SETTING_ON;
-	ShadowGroupSetting shadow_group_setting = SHADOW_GLOBAL;
 	Ref<Material> material_override;
 	Ref<Material> material_overlay;
 
@@ -163,9 +157,6 @@ protected:
 public:
 	void set_cast_shadows_setting(ShadowCastingSetting p_shadow_casting_setting);
 	ShadowCastingSetting get_cast_shadows_setting() const;
-
-	void set_shadow_group_setting(ShadowGroupSetting p_shadow_casting_setting);
-	ShadowGroupSetting get_shadow_group_setting() const;
 
 	void set_transparency(float p_transparency);
 	float get_transparency() const;
@@ -225,7 +216,6 @@ public:
 };
 
 VARIANT_ENUM_CAST(GeometryInstance3D::ShadowCastingSetting);
-VARIANT_ENUM_CAST(GeometryInstance3D::ShadowGroupSetting);
 VARIANT_ENUM_CAST(GeometryInstance3D::GIMode);
 VARIANT_ENUM_CAST(GeometryInstance3D::LightmapScale);
 VARIANT_ENUM_CAST(GeometryInstance3D::VisibilityRangeFadeMode);
