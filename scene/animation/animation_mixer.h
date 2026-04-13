@@ -97,11 +97,21 @@ public:
 		Ref<Animation> animation;
 		PlaybackInfo playback_info;
 	};
-	bool is_driven_by_capture = false;
-	Dictionary current_capture = Dictionary();
 
-	Dictionary get_current_capture();
-	void set_current_capture(Dictionary p_capture);
+	HashMap<Ref<Animation>, StringName> anim_reverse_look_up = HashMap<Ref<Animation>, StringName>();
+	bool is_driven_by_capture = false;
+	Array current_capture = Array();
+
+	Array get_current_capture();
+	void set_current_capture(Array p_capture);
+	void apply_current_capture();
+
+	void set_is_driven_by_capture(bool p_driven_by_capture) {
+		is_driven_by_capture = p_driven_by_capture;
+	}
+	bool get_is_driven_by_capture() {
+		return is_driven_by_capture;
+	}
 
 protected:
 	/* ---- Data lists ---- */

@@ -179,7 +179,6 @@ void AnimationMixer::_animation_set_cache_update() {
 				}
 			}
 		}
-		update_animations_table();
 	}
 
 	// Check removed.
@@ -689,8 +688,10 @@ bool AnimationMixer::_update_caches() {
 	if (has_reset_anim) {
 		reset_anim = get_animation(SceneStringName(RESET));
 	}
+	anim_reverse_look_up.clear();
 	for (const StringName &E : sname_list) {
 		const Ref<Animation> &anim = get_animation(E);
+		anim_reverse_look_up[anim] = E;
 		for (int i = 0; i < anim->get_track_count(); i++) {
 			if (!anim->track_is_enabled(i)) {
 				continue;
@@ -1012,6 +1013,9 @@ bool AnimationMixer::_update_caches() {
 void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	_blend_init();
 	if (cache_valid && _blend_pre_process(p_delta, track_count, track_map)) {
+		if (is_driven_by_capture) {
+			apply_current_capture();
+		}
 		_blend_capture(p_delta);
 		_blend_calc_total_weight();
 		if (!is_driven_by_capture) {
@@ -1030,28 +1034,88 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 void AnimationMixer::_capture_current_state() {
 	current_capture.clear();
 	for (const AnimationInstance &ai : animation_instances) {
-		bool push_anim_back = false;
-		if (ai.playback_info.track_weights != nullptr) {
-			for (uint8_t i = 0; i < ai.playback_info.track_weights->size(); i++) {
-				if (!Math::is_zero_approx((*ai.playback_info.track_weights)[i])) {
-					push_anim_back = true;
-					break;
+		// We need to keep track of whether we are using per-track weights
+		bool has_per_track = ai.playback_info.track_weights != nullptr;
+		PackedByteArray track_mask;
+		float blend_weight = ai.playback_info.weight;
+
+		if (has_per_track) {
+			uint32_t track_count = ai.playback_info.track_weights->size();
+			uint32_t byte_count = (track_count + 7) / 8;
+			track_mask.resize(byte_count);
+			track_mask.fill(0);
+			uint8_t *mask_ptr = track_mask.ptrw();
+
+			float max_w = 0.0;
+			for (uint32_t i = 0; i < track_count; i++) {
+				float w = (*ai.playback_info.track_weights)[i];
+				if (Math::abs(w) > Math::abs(max_w)) {
+					max_w = w;
+				}
+
+				if (!Math::is_zero_approx(w)) {
+					mask_ptr[i / 8] |= (1 << (i % 8));
 				}
 			}
+			blend_weight = max_w; // Store the peak weight
 		}
-		if (push_anim_back) {
-			Array Data = Array();
-			Data.push_back(ai.playback_info.time);
-			Data.push_back(ai.playback_info.weight);
-			current_capture.set(ai.animation->get_name(), Data);
+
+		if (!Math::is_zero_approx(blend_weight) || has_per_track) {
+			Array data;
+			data.push_back(anim_reverse_look_up[ai.animation]);
+			data.push_back(ai.playback_info.time);
+			data.push_back(blend_weight);
+			data.push_back(track_mask);
+			current_capture.push_back(data);
 		}
 	}
 }
-Dictionary AnimationMixer::get_current_capture() {
+Array AnimationMixer::get_current_capture() {
 	return current_capture;
 }
-void AnimationMixer::set_current_capture(Dictionary p_capture) {
-	return;
+void AnimationMixer::set_current_capture(Array p_capture) {
+	current_capture = p_capture;
+}
+
+void AnimationMixer::apply_current_capture() {
+	animation_instances.clear();
+
+	for (int i = 0; i < current_capture.size(); i++) {
+		Array data = current_capture[i];
+		StringName anim_name = data[0];
+		double time = data[1];
+		float weight = data[2];
+		PackedByteArray track_mask = data[3];
+
+		if (!has_animation(anim_name)) {
+			continue;
+		}
+
+		AnimationInstance ai;
+		ai.animation = get_animation(anim_name);
+		ai.playback_info.time = time;
+
+		if (track_mask.size() > 0) {
+			uint32_t track_count = ai.animation->get_track_count();
+			ai.playback_info.track_weights = memnew(LocalVector<real_t>);
+			ai.playback_info.track_weights->resize(track_count);
+
+			const uint8_t *mask_ptr = track_mask.ptr();
+			for (uint32_t j = 0; j < track_count; j++) {
+				// FIXED: Use bitwise & here
+				if ((mask_ptr[j / 8] & (1 << (j % 8)))) {
+					(*ai.playback_info.track_weights)[j] = weight;
+				} else {
+					(*ai.playback_info.track_weights)[j] = 0.0;
+				}
+			}
+			ai.playback_info.weight = 1.0; // Mixer uses track_weights if present
+		} else {
+			ai.playback_info.weight = weight;
+			ai.playback_info.track_weights = nullptr;
+		}
+		animation_instances.push_back(ai);
+	}
 }
 
 Variant AnimationMixer::_post_process_key_value(const Ref<Animation> &p_anim, int p_track, Variant &p_value, ObjectID p_object_id, int p_object_sub_idx) {
@@ -2526,6 +2590,9 @@ void AnimationMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_current_capture", "capture"), &AnimationMixer::set_current_capture);
 	ClassDB::bind_method(D_METHOD("get_current_capture"), &AnimationMixer::get_current_capture);
 
+	ClassDB::bind_method(D_METHOD("set_is_driven_by_capture", "enabled"), &AnimationMixer::set_is_driven_by_capture);
+	ClassDB::bind_method(D_METHOD("get_is_driven_by_capture"), &AnimationMixer::get_is_driven_by_capture);
+
 	/* ---- Capture feature ---- */
 	ClassDB::bind_method(D_METHOD("capture", "name", "duration", "trans_type", "ease_type"), &AnimationMixer::capture, DEFVAL(Tween::TRANS_LINEAR), DEFVAL(Tween::EASE_IN));
 
@@ -2533,6 +2600,8 @@ void AnimationMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_reset_on_save_enabled", "enabled"), &AnimationMixer::set_reset_on_save_enabled);
 	ClassDB::bind_method(D_METHOD("is_reset_on_save_enabled"), &AnimationMixer::is_reset_on_save_enabled);
 
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "is_driven_by_capture"), "set_is_driven_by_capture", "get_is_driven_by_capture");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "current_capture"), "set_current_capture", "get_current_capture");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "deterministic"), "set_deterministic", "is_deterministic");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reset_on_save", PROPERTY_HINT_NONE, ""), "set_reset_on_save_enabled", "is_reset_on_save_enabled");
