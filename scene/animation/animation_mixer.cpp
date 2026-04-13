@@ -155,7 +155,6 @@ void AnimationMixer::_animation_set_cache_update() {
 	// Relatively fast function to update all animations.
 	animation_set_update_pass++;
 	bool clear_cache_needed = false;
-
 	// Update changed and add otherwise.
 	for (const AnimationLibraryData &lib : animation_libraries) {
 		for (const KeyValue<StringName, Ref<Animation>> &K : lib.library->animations) {
@@ -180,6 +179,7 @@ void AnimationMixer::_animation_set_cache_update() {
 				}
 			}
 		}
+		update_animations_table();
 	}
 
 	// Check removed.
@@ -1014,6 +1014,9 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	if (cache_valid && _blend_pre_process(p_delta, track_count, track_map)) {
 		_blend_capture(p_delta);
 		_blend_calc_total_weight();
+		if (!is_driven_by_capture) {
+			_capture_current_state();
+		}
 		_blend_process(p_delta, p_update_only);
 		clear_animation_instances();
 		_blend_apply();
@@ -1022,6 +1025,33 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	} else {
 		clear_animation_instances();
 	}
+}
+
+void AnimationMixer::_capture_current_state() {
+	current_capture.clear();
+	for (const AnimationInstance &ai : animation_instances) {
+		bool push_anim_back = false;
+		if (ai.playback_info.track_weights != nullptr) {
+			for (uint8_t i = 0; i < ai.playback_info.track_weights->size(); i++) {
+				if (!Math::is_zero_approx((*ai.playback_info.track_weights)[i])) {
+					push_anim_back = true;
+					break;
+				}
+			}
+		}
+		if (push_anim_back) {
+			Array Data = Array();
+			Data.push_back(ai.playback_info.time);
+			Data.push_back(ai.playback_info.weight);
+			current_capture.set(ai.animation->get_name(), Data);
+		}
+	}
+}
+Dictionary AnimationMixer::get_current_capture() {
+	return current_capture;
+}
+void AnimationMixer::set_current_capture(Dictionary p_capture) {
+	return;
 }
 
 Variant AnimationMixer::_post_process_key_value(const Ref<Animation> &p_anim, int p_track, Variant &p_value, ObjectID p_object_id, int p_object_sub_idx) {
@@ -2492,6 +2522,9 @@ void AnimationMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_caches"), &AnimationMixer::clear_caches);
 	ClassDB::bind_method(D_METHOD("advance", "delta"), &AnimationMixer::advance);
 	GDVIRTUAL_BIND(_post_process_key_value, "animation", "track", "value", "object_id", "object_sub_idx");
+
+	ClassDB::bind_method(D_METHOD("set_current_capture", "capture"), &AnimationMixer::set_current_capture);
+	ClassDB::bind_method(D_METHOD("get_current_capture"), &AnimationMixer::get_current_capture);
 
 	/* ---- Capture feature ---- */
 	ClassDB::bind_method(D_METHOD("capture", "name", "duration", "trans_type", "ease_type"), &AnimationMixer::capture, DEFVAL(Tween::TRANS_LINEAR), DEFVAL(Tween::EASE_IN));

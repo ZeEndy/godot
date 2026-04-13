@@ -97,6 +97,11 @@ public:
 		Ref<Animation> animation;
 		PlaybackInfo playback_info;
 	};
+	bool is_driven_by_capture = false;
+	Dictionary current_capture = Dictionary();
+
+	Dictionary get_current_capture();
+	void set_current_capture(Dictionary p_capture);
 
 protected:
 	/* ---- Data lists ---- */
@@ -162,6 +167,7 @@ protected:
 
 		virtual ~TrackCache() {}
 	};
+	void _capture_current_state();
 
 	struct TrackCacheTransform : public TrackCache {
 #ifndef _3D_DISABLED
