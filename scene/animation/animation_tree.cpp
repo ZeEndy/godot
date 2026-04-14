@@ -643,6 +643,9 @@ bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const 
 	if (root_animation_node.is_null()) {
 		return false;
 	}
+	if (is_driven_by_capture) {
+		return true;
+	}
 
 	{ // Setup.
 		process_pass++;

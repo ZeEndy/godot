@@ -98,6 +98,23 @@ public:
 		AnimationData animation_data;
 		PlaybackInfo playback_info;
 	};
+	HashMap<Ref<Animation>, StringName> anim_reverse_look_up = HashMap<Ref<Animation>, StringName>();
+	bool is_driven_by_capture = false;
+	float time_between_captures = 0.0;
+	Array visual_capture = Array();
+	Array current_capture = Array();
+
+	Array get_current_capture();
+	void _capture_current_state();
+	void set_current_capture(Array p_capture);
+	void apply_current_capture();
+
+	void set_is_driven_by_capture(bool p_driven_by_capture) {
+		is_driven_by_capture = p_driven_by_capture;
+	}
+	bool get_is_driven_by_capture() {
+		return is_driven_by_capture;
+	}
 
 protected:
 	/* ---- Data lists ---- */

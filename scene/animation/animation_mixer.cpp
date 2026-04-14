@@ -683,8 +683,10 @@ bool AnimationMixer::_update_caches() {
 	if (has_reset_anim) {
 		reset_anim = get_animation(SceneStringName(RESET));
 	}
+	anim_reverse_look_up.clear();
 	for (const StringName &E : sname_list) {
 		Ref<Animation> anim = get_animation(E);
+		anim_reverse_look_up[anim] = E;
 		for (int i = 0; i < anim->get_track_count(); i++) {
 			if (!anim->track_is_enabled(i)) {
 				continue;
@@ -1001,8 +1003,14 @@ bool AnimationMixer::_update_caches() {
 void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	_blend_init();
 	if (cache_valid && _blend_pre_process(p_delta, track_count, track_map)) {
+		if (is_driven_by_capture) {
+			apply_current_capture();
+		}
 		_blend_capture(p_delta);
 		_blend_calc_total_weight();
+		if (!is_driven_by_capture) {
+			_capture_current_state();
+		}
 		_blend_process(p_delta, p_update_only);
 		clear_animation_instances();
 		_blend_apply();
@@ -1010,6 +1018,127 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 		emit_signal(SNAME("mixer_applied"));
 	} else {
 		clear_animation_instances();
+	}
+}
+void AnimationMixer::_capture_current_state() {
+	current_capture.clear();
+
+	for (const AnimationInstance &ai : animation_instances) {
+		bool has_per_track = ai.playback_info.track_weights.size() > 0;
+		float blend_weight = ai.playback_info.weight;
+
+		HashMap<float, PackedByteArray> grouped_masks;
+		uint32_t t_count = ai.playback_info.track_weights.size();
+		uint32_t byte_count = (t_count + 7) / 8;
+
+		if (has_per_track) {
+			float max_w = 0.0;
+
+			for (uint32_t i = 0; i < t_count; i++) {
+				float w = ai.playback_info.track_weights[i];
+
+				if (Math::abs(w) > Math::abs(max_w)) {
+					max_w = w;
+				}
+
+				float target_key = w;
+				bool found_group = false;
+
+				for (const KeyValue<float, PackedByteArray> &E : grouped_masks) {
+					if (Math::is_equal_approx(E.key, w)) {
+						target_key = E.key;
+						found_group = true;
+						break;
+					}
+				}
+				if (!found_group) {
+					PackedByteArray new_mask;
+					new_mask.resize(byte_count);
+					new_mask.fill(0);
+					grouped_masks[target_key] = new_mask;
+				}
+
+				uint8_t *mask_ptr = grouped_masks[target_key].ptrw();
+				mask_ptr[i / 8] |= (1 << (i % 8));
+			}
+			blend_weight = max_w;
+		}
+
+		if (!Math::is_zero_approx(blend_weight)) {
+			Array adata;
+			adata.push_back(anim_reverse_look_up[ai.animation_data.animation]);
+			adata.push_back(ai.playback_info.time);
+			adata.push_back(ai.playback_info.delta);
+			adata.push_back(blend_weight);
+			adata.push_back(ai.playback_info.looped_flag);
+			Dictionary groups;
+			for (const KeyValue<float, PackedByteArray> &E : grouped_masks) {
+				groups[E.key] = E.value;
+			}
+			adata.push_back(groups);
+
+			current_capture.push_back(adata);
+		}
+	}
+}
+Array AnimationMixer::get_current_capture() {
+	return current_capture;
+}
+void AnimationMixer::set_current_capture(Array p_capture) {
+	current_capture = p_capture;
+}
+
+void AnimationMixer::apply_current_capture() {
+	animation_instances.clear();
+	for (int i = 0; i < current_capture.size(); i++) {
+		Array adata = current_capture[i];
+		if (adata.size() < 6) { // if data is bad then quit
+			continue;
+		}
+		StringName anim_name = adata[0];
+		double time = adata[1];
+		float delta = adata[2];
+		float weight = adata[3];
+		Animation::LoopedFlag loop_flag = adata[4];
+		Dictionary grouped_weights = adata[5];
+
+		if (!has_animation(anim_name)) {
+			continue;
+		}
+
+		AnimationInstance ai;
+		ai.animation_data.animation = get_animation(anim_name);
+		ai.playback_info.time = time;
+
+		uint32_t t_count = ai.animation_data.animation->get_track_count();
+		ai.playback_info.track_weights.resize(t_count);
+		real_t *ptr = ai.playback_info.track_weights.ptrw();
+
+		if (grouped_weights.size() > 0) {
+			ai.playback_info.track_weights.fill(0.0);
+
+			Array keys = grouped_weights.keys();
+			for (int k = 0; k < keys.size(); k++) {
+				float group_weight = keys[k];
+				PackedByteArray track_mask = grouped_weights[group_weight];
+				const uint8_t *mask_ptr = track_mask.ptr();
+				uint32_t mask_bits = track_mask.size() * 8;
+				uint32_t limit = MIN(t_count, mask_bits);
+
+				for (uint32_t j = 0; j < limit; j++) {
+					if ((mask_ptr[j / 8] & (1 << (j % 8)))) {
+						ptr[j] = group_weight;
+					}
+				}
+			}
+			ai.playback_info.weight = 1.0;
+		} else {
+			ai.playback_info.weight = weight;
+			ai.playback_info.track_weights = Vector<real_t>();
+			ai.playback_info.track_weights.resize(t_count);
+			ai.playback_info.track_weights.fill(weight);
+		}
+		animation_instances.push_back(ai);
 	}
 }
 
@@ -2447,6 +2576,11 @@ void AnimationMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_caches"), &AnimationMixer::clear_caches);
 	ClassDB::bind_method(D_METHOD("advance", "delta"), &AnimationMixer::advance);
 	GDVIRTUAL_BIND(_post_process_key_value, "animation", "track", "value", "object_id", "object_sub_idx");
+	ClassDB::bind_method(D_METHOD("set_current_capture", "capture"), &AnimationMixer::set_current_capture);
+	ClassDB::bind_method(D_METHOD("get_current_capture"), &AnimationMixer::get_current_capture);
+
+	ClassDB::bind_method(D_METHOD("set_is_driven_by_capture", "enabled"), &AnimationMixer::set_is_driven_by_capture);
+	ClassDB::bind_method(D_METHOD("get_is_driven_by_capture"), &AnimationMixer::get_is_driven_by_capture);
 
 	/* ---- Capture feature ---- */
 	ClassDB::bind_method(D_METHOD("capture", "name", "duration", "trans_type", "ease_type"), &AnimationMixer::capture, DEFVAL(Tween::TRANS_LINEAR), DEFVAL(Tween::EASE_IN));
@@ -2456,6 +2590,8 @@ void AnimationMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_reset_on_save_enabled"), &AnimationMixer::is_reset_on_save_enabled);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "is_driven_by_capture"), "set_is_driven_by_capture", "get_is_driven_by_capture");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "current_capture"), "set_current_capture", "get_current_capture");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "deterministic"), "set_deterministic", "is_deterministic");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reset_on_save", PROPERTY_HINT_NONE, ""), "set_reset_on_save_enabled", "is_reset_on_save_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "root_node"), "set_root_node", "get_root_node");
