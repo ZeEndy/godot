@@ -684,8 +684,14 @@ bool AnimationMixer::_update_caches() {
 		reset_anim = get_animation(SceneStringName(RESET));
 	}
 	anim_reverse_look_up.clear();
+	anim_to_idx.clear();
+	idx_to_anim.clear();
+	uint32_t anim_idx = 0;
 	for (const StringName &E : sname_list) {
 		Ref<Animation> anim = get_animation(E);
+		anim_to_idx[E] = anim_idx;
+		idx_to_anim[anim_idx] = E;
+		anim_idx++;
 		anim_reverse_look_up[anim] = E;
 		for (int i = 0; i < anim->get_track_count(); i++) {
 			if (!anim->track_is_enabled(i)) {
@@ -1004,7 +1010,7 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	_blend_init();
 	if (cache_valid && _blend_pre_process(p_delta, track_count, track_map)) {
 		if (is_driven_by_capture) {
-			apply_current_capture();
+			apply_current_capture(p_delta);
 		}
 		_blend_capture(p_delta);
 		_blend_calc_total_weight();
@@ -1019,6 +1025,7 @@ void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	} else {
 		clear_animation_instances();
 	}
+	time_between_captures += p_delta;
 }
 void AnimationMixer::_capture_current_state() {
 	current_capture.clear();
@@ -1066,14 +1073,20 @@ void AnimationMixer::_capture_current_state() {
 
 		if (!Math::is_zero_approx(blend_weight)) {
 			Array adata;
-			adata.push_back(anim_reverse_look_up[ai.animation_data.animation]);
-			adata.push_back(ai.playback_info.time);
+			adata.push_back(ai.playback_info.hash);
+			adata.push_back(anim_to_idx[anim_reverse_look_up[ai.animation_data.animation]]);
+			double length = ai.animation_data.animation->get_length();
+			double phase = (length > CMP_EPSILON) ? (ai.playback_info.time / length) : 0.0;
+			adata.push_back(phase);
 			adata.push_back(ai.playback_info.delta);
 			adata.push_back(blend_weight);
 			adata.push_back(ai.playback_info.looped_flag);
-			Dictionary groups;
+			Array groups;
 			for (const KeyValue<float, PackedByteArray> &E : grouped_masks) {
-				groups[E.key] = E.value;
+				Array group_pair;
+				group_pair.push_back(E.key);
+				group_pair.push_back(E.value);
+				groups.push_back(group_pair);
 			}
 			adata.push_back(groups);
 
@@ -1085,22 +1098,241 @@ Array AnimationMixer::get_current_capture() {
 	return current_capture;
 }
 void AnimationMixer::set_current_capture(Array p_capture) {
+	if (time_between_captures > 0.007) { //
+		CaptureSnapshot new_snap;
+		new_snap.data = p_capture;
+		new_snap.duration = (float)MIN(time_between_captures, 0.1);
+		capture_history.push_back(new_snap);
+		time_between_captures = 0.0;
+		if (capture_history.size() > 10) {
+			capture_history.remove_at(0);
+		}
+	}
+
 	current_capture = p_capture;
 }
 
-void AnimationMixer::apply_current_capture() {
+void AnimationMixer::apply_current_capture(double p_delta) {
+	animation_instances.clear();
+	if (capture_history.size() < 2) {
+		return;
+	}
+	double time_booster = 1.0;
+	const int MAX_HISTORY = 8;
+	const int TARGET_HISTORY = 3;
+	if (capture_history.size() > MAX_HISTORY) {
+		capture_history.remove_at(0);
+
+		while (capture_history.size() > 2) {
+			capture_history.remove_at(1);
+		}
+
+		capture_alpha = 0.0;
+	}
+	if (capture_history.size() > TARGET_HISTORY) {
+		double over_flow = (double)(capture_history.size() - TARGET_HISTORY);
+		time_booster = 1.0 + (over_flow * 0.05);
+	}
+
+	double time_to_consume = p_delta * time_booster;
+
+	while (capture_history.size() > 2) {
+		double current_duration = capture_history[1].duration;
+		double time_left_in_frame = current_duration * (1.0 - capture_alpha);
+
+		if (time_to_consume >= time_left_in_frame) {
+			time_to_consume -= time_left_in_frame;
+			capture_history.remove_at(0);
+			capture_alpha = 0.0;
+		} else {
+			break;
+		}
+	}
+	capture_alpha += time_to_consume / capture_history[1].duration;
+	if (capture_history.size() <= 2 && capture_alpha > 1.0) {
+		capture_alpha = 1.0;
+	}
+	//print_line(vformat("capture duration :%f, capture_history: %d, time scale:%f, alpha:%f", (capture_history[1].duration) + (float)p_delta, capture_history.size(), time_scale, capture_alpha));
+	Array from_capture = capture_history[0].data;
+	Array to_capture = capture_history[1].data;
+
+	Vector<bool> to_matched;
+	to_matched.resize(to_capture.size());
+	to_matched.fill(false);
+
+	auto extract_tracks = [&](Array data_array, Vector<float> &out_tracks, uint32_t t_count) {
+		float base_weight = data_array[4];
+		Array groups = data_array[6];
+		out_tracks.resize(t_count);
+
+		if (groups.size() > 0) {
+			out_tracks.fill(0.0);
+			for (int k = 0; k < groups.size(); k++) {
+				Array group_pair = groups[k];
+				float group_weight = group_pair[0];
+				PackedByteArray track_mask = group_pair[1];
+
+				const uint8_t *mask_ptr = track_mask.ptr();
+				uint32_t mask_bits = track_mask.size() * 8;
+				uint32_t limit = MIN(t_count, mask_bits);
+
+				for (uint32_t j = 0; j < limit; j++) {
+					if ((mask_ptr[j / 8] & (1 << (j % 8)))) {
+						out_tracks.write[j] = group_weight;
+					}
+				}
+			}
+		} else {
+			out_tracks.fill(base_weight);
+		}
+	};
+
+	// match existing stuff
+	for (int i = 0; i < from_capture.size(); i++) {
+		Array f_data = from_capture[i];
+		if (f_data.size() < 7) {
+			continue;
+		}
+
+		uint32_t hash = f_data[0];
+
+		int to_idx = -1;
+		for (int j = 0; j < to_capture.size(); j++) {
+			Array t_data = to_capture[j];
+			if (t_data.size() >= 7 && (uint32_t)t_data[0] == hash) { // check if anim hash is the same so we dont crosslink stuff by actident
+				to_idx = j;
+				break;
+			}
+		}
+
+		AnimationInstance inst;
+		inst.playback_info.hash = hash;
+		inst.animation_data.animation = get_animation(idx_to_anim[f_data[1]]);
+		if (inst.animation_data.animation.is_null()) {
+			continue;
+		}
+
+		uint32_t t_count = inst.animation_data.animation->get_track_count();
+		double anim_length = inst.animation_data.animation->get_length();
+
+		Vector<float> f_tracks, t_tracks;
+		extract_tracks(f_data, f_tracks, t_count);
+
+		double f_time = f_data[2];
+		double t_time;
+		double length = inst.animation_data.animation->get_length();
+		if (to_idx != -1) {
+			//anim matched do normal interp
+			to_matched.write[to_idx] = true;
+			Array t_data = to_capture[to_idx];
+			extract_tracks(t_data, t_tracks, t_count);
+
+			t_time = t_data[2];
+			inst.playback_info.delta = t_data[3];
+
+		} else {
+			//anim missing so we we make make its target 0.0
+			t_tracks.resize(t_count);
+			t_tracks.fill(0.0f);
+
+			inst.playback_info.delta = f_data[3];
+			t_time = f_time; //+ (double)f_data[3]; // used to keep going forwards but forgot about the fact that delta gets messed up from time seek
+		}
+
+		inst.playback_info.time = (f_time + (fmod(2.0 * fmod(t_time - f_time, 1.0), 1.0) - fmod(t_time - f_time, 1.0)) * capture_alpha) * length;
+
+		inst.playback_info.weight = 1.0f;
+		inst.playback_info.track_weights.resize(t_count);
+
+		bool aactive = false;
+		real_t *inst_w_ptr = inst.playback_info.track_weights.ptrw();
+		for (uint32_t j = 0; j < t_count; j++) {
+			inst_w_ptr[j] = Math::lerp(f_tracks[j], t_tracks[j], capture_alpha);
+			if (!Math::is_zero_approx(inst_w_ptr[j])) {
+				aactive = true;
+			}
+		}
+
+		if (aactive) {
+			animation_instances.push_back(inst);
+		}
+	}
+
+	//add the new stuff
+	for (int j = 0; j < to_capture.size(); j++) {
+		if (to_matched[j]) {
+			continue; // we've dealt with it already
+		}
+
+		Array t_data = to_capture[j];
+		if (t_data.size() < 7) {
+			continue;
+		}
+
+		AnimationInstance inst;
+		inst.playback_info.hash = t_data[0];
+		inst.animation_data.animation = get_animation(idx_to_anim[t_data[1]]);
+		if (inst.animation_data.animation.is_null()) {
+			continue;
+		}
+
+		uint32_t t_count = inst.animation_data.animation->get_track_count();
+		double anim_length = inst.animation_data.animation->get_length();
+
+		Vector<float> f_tracks, t_tracks;
+		extract_tracks(t_data, t_tracks, t_count);
+
+		f_tracks.resize(t_count);
+		f_tracks.fill(0.0f); // start from zero
+
+		double t_time = t_data[2];
+		inst.playback_info.delta = t_data[3];
+
+		// Extrapolate backward so it plays into its current position
+		double f_time = t_time - (double)inst.playback_info.delta;
+
+		double length = inst.animation_data.animation->get_length();
+		inst.playback_info.time = (f_time + (fmod(2.0 * fmod(t_time - f_time, 1.0), 1.0) - fmod(t_time - f_time, 1.0)) * capture_alpha) * length;
+
+		/* if (inst.animation_data.animation->get_loop_mode() != Animation::LOOP_NONE && anim_length > 0.0) {
+			inst.playback_info.time = Math::fmod(inst.playback_info.time, anim_length);
+			if (inst.playback_info.time < 0.0) {
+				inst.playback_info.time += anim_length;
+			}
+		}*/
+
+		inst.playback_info.weight = 1.0f;
+		inst.playback_info.track_weights.resize(t_count);
+
+		bool aactive = false;
+		real_t *inst_w_ptr = inst.playback_info.track_weights.ptrw();
+		for (uint32_t k = 0; k < t_count; k++) {
+			inst_w_ptr[k] = Math::lerp(f_tracks[k], t_tracks[k], capture_alpha);
+			if (!Math::is_zero_approx(inst_w_ptr[k])) {
+				aactive = true;
+			}
+		}
+
+		if (aactive) {
+			animation_instances.push_back(inst);
+		}
+	}
+}
+/*
+void AnimationMixer::apply_current_capture(double p_delta) {
 	animation_instances.clear();
 	for (int i = 0; i < current_capture.size(); i++) {
 		Array adata = current_capture[i];
-		if (adata.size() < 6) { // if data is bad then quit
+		if (adata.size() < 7) { // if data is bad then quit
 			continue;
 		}
-		StringName anim_name = adata[0];
-		double time = adata[1];
-		float delta = adata[2];
-		float weight = adata[3];
-		Animation::LoopedFlag loop_flag = adata[4];
-		Dictionary grouped_weights = adata[5];
+		uint32_t hash = adata[0];
+		StringName anim_name = idx_to_anim[adata[1]];
+		double phase = adata[2];
+		float delta = adata[3];
+		float weight = adata[4];
+		Animation::LoopedFlag loop_flag = adata[5];
+		Array grouped_weights = adata[6];
 
 		if (!has_animation(anim_name)) {
 			continue;
@@ -1108,8 +1340,9 @@ void AnimationMixer::apply_current_capture() {
 
 		AnimationInstance ai;
 		ai.animation_data.animation = get_animation(anim_name);
-		ai.playback_info.time = time;
-
+		double length = ai.animation_data.animation->get_length();
+		ai.playback_info.time = phase * length;
+		ai.playback_info.delta = 0.0;
 		uint32_t t_count = ai.animation_data.animation->get_track_count();
 		ai.playback_info.track_weights.resize(t_count);
 		real_t *ptr = ai.playback_info.track_weights.ptrw();
@@ -1117,10 +1350,11 @@ void AnimationMixer::apply_current_capture() {
 		if (grouped_weights.size() > 0) {
 			ai.playback_info.track_weights.fill(0.0);
 
-			Array keys = grouped_weights.keys();
-			for (int k = 0; k < keys.size(); k++) {
-				float group_weight = keys[k];
-				PackedByteArray track_mask = grouped_weights[group_weight];
+			for (int k = 0; k < grouped_weights.size(); k++) {
+				Array group_pair = grouped_weights[k];
+				float group_weight = group_pair[0];
+				PackedByteArray track_mask = group_pair[1];
+
 				const uint8_t *mask_ptr = track_mask.ptr();
 				uint32_t mask_bits = track_mask.size() * 8;
 				uint32_t limit = MIN(t_count, mask_bits);
@@ -1141,6 +1375,7 @@ void AnimationMixer::apply_current_capture() {
 		animation_instances.push_back(ai);
 	}
 }
+*/
 
 Variant AnimationMixer::_post_process_key_value(const Ref<Animation> &p_anim, int p_track, Variant &p_value, ObjectID p_object_id, int p_object_sub_idx) {
 #ifndef _3D_DISABLED

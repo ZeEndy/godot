@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/os/time.h"
 #include "core/templates/a_hash_map.h"
 #include "scene/animation/tween.h"
 #include "scene/main/node.h"
@@ -83,12 +84,14 @@ public:
 	};
 
 	struct PlaybackInfo {
+		uint32_t hash = 0;
 		double time = 0.0;
 		double delta = 0.0;
 		double start = 0.0;
 		double end = 0.0;
 		bool seeked = false;
 		bool is_external_seeking = false;
+		bool is_normalized = true;
 		Animation::LoopedFlag looped_flag = Animation::LOOPED_FLAG_NONE;
 		real_t weight = 0.0;
 		Vector<real_t> track_weights;
@@ -99,15 +102,30 @@ public:
 		PlaybackInfo playback_info;
 	};
 	HashMap<Ref<Animation>, StringName> anim_reverse_look_up = HashMap<Ref<Animation>, StringName>();
+	HashMap<StringName, uint32_t> anim_to_idx;
+	HashMap<uint32_t, StringName> idx_to_anim;
 	bool is_driven_by_capture = false;
+	float last_capture_timestamp = 0.0;
 	float time_between_captures = 0.0;
-	Array visual_capture = Array();
+	float get_time_between_captures() {
+		return time_between_captures;
+	}
+	void set_time_between_captures(float p_time) {
+		time_between_captures = p_time;
+	}
+	LocalVector<AnimationInstance> visual_capture;
+	struct CaptureSnapshot {
+		Array data;
+		float duration;
+	};
+	LocalVector<CaptureSnapshot> capture_history;
+	float capture_alpha = 0.0;
 	Array current_capture = Array();
 
 	Array get_current_capture();
 	void _capture_current_state();
 	void set_current_capture(Array p_capture);
-	void apply_current_capture();
+	void apply_current_capture(double p_delta);
 
 	void set_is_driven_by_capture(bool p_driven_by_capture) {
 		is_driven_by_capture = p_driven_by_capture;

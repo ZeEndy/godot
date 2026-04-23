@@ -312,6 +312,7 @@ AnimationNode::NodeTimeInfo AnimationNode::_blend_node(Ref<AnimationNode> p_node
 	// that a synced AnimationNodeSync exists under the un-synced AnimationNodeSync.
 	p_node->set_node_state_base_path(new_path);
 	p_node->node_state.parent = new_parent;
+	p_playback_info.hash = p_node.hash();
 	if (!p_playback_info.seeked && !p_sync && !any_valid) {
 		p_playback_info.delta = 0.0;
 		return p_node->_pre_process(process_state, p_playback_info, p_test_only);
