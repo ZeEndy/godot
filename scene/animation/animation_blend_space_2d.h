@@ -143,6 +143,7 @@ public:
 
 	virtual Ref<AnimationNode> get_child_by_name(const StringName &p_name) const override;
 
+	virtual void capture_state(ProcessState *p_state, Array &cs) override;
 	AnimationNodeBlendSpace2D();
 	~AnimationNodeBlendSpace2D();
 };

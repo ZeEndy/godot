@@ -52,6 +52,11 @@ public:
 		FILTER_STOP,
 		FILTER_BLEND
 	};
+	enum AnimCommand {
+		CMD_SAMPLE,
+		CMD_BLEND2,
+		CMD_ADD2
+	};
 
 	struct Input {
 		String name;
@@ -70,7 +75,6 @@ public:
 		double length = 0.0;
 		double position = 0.0;
 		double delta = 0.0;
-
 		// Needs internally to estimate remain time, the previous frame values are not retained.
 		Animation::LoopMode loop_mode = Animation::LOOP_NONE;
 		bool will_end = false; // For breaking loop, it is true when just looped.
@@ -226,10 +230,37 @@ public:
 	bool is_deletable() const;
 
 	ObjectID get_processing_animation_tree_instance_id() const;
-
 	bool is_process_testing() const;
 
 	virtual bool has_filter() const;
+
+	virtual Vector<AnimationNode *> get_next_connections(); //
+
+	virtual void capture_state(ProcessState *p_state, Array &cs) {
+		//by default most animationnodes exist within the blendtree
+		//so any node who's capture_state i DONT override will just bypass itself
+		process_state = p_state;
+		Vector<AnimationNode *> next_in_firing_line = get_next_connections();
+		for (AnimationNode *AnimNode : next_in_firing_line) {
+			AnimNode->capture_state(p_state, cs);
+		}
+		process_state = nullptr;
+		//first we go balls deep in the tree
+		//THEN we push ourselves as an "operation" in the function
+		//since this is base node we do not care lmao
+		//unless its a statemachine or something then we're FUCKED if not overidden
+		/*
+		exmaple from animationnodeanimation
+		process_state = p_state;
+		NodeTimeInfo nti = get_node_time_info();
+		Array ACommand;
+		ACommand.push_back(CMD_SAMPLE);
+		ACommand.push_back(get_path());
+		ACommand.push_back(nti.position);
+		cs.push_back(ACommand);
+		process_state = nullptr;
+		*/
+	}
 
 #ifdef TOOLS_ENABLED
 	virtual void get_argument_options(const StringName &p_function, int p_idx, List<String> *r_options) const override;
@@ -307,6 +338,8 @@ private:
 
 	NodePath animation_player;
 
+	HashSet<uint32_t> recorded_nodes;
+
 	void _setup_animation_player();
 	void _animation_player_changed();
 
@@ -323,7 +356,9 @@ private:
 
 	// Make animation instances.
 	virtual bool _blend_pre_process(double p_delta, int p_track_count, const AHashMap<NodePath, int> &p_track_map) override;
-
+	mutable AHashMap<uint32_t, AnimationNode *> hash_to_node;
+	void apply_capture(int p_track_count, AnimationNode::ProcessState *p_state);
+	float calculate_capture_weight(int p_idx, float p_node_weight, bool p_has_filter, AnimationNode::FilterAction p_mode, const float *p_mask);
 #ifndef DISABLE_DEPRECATED
 	void _set_process_callback_bind_compat_80813(AnimationProcessCallback p_mode);
 	AnimationProcessCallback _get_process_callback_bind_compat_80813() const;
@@ -347,7 +382,6 @@ public:
 
 	bool is_state_invalid() const;
 	String get_invalid_state_reason() const;
-
 	real_t get_connection_activity(const StringName &p_path, int p_connection) const;
 
 	uint64_t get_last_process_pass() const;

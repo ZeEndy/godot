@@ -1883,6 +1883,39 @@ Vector<StringName> AnimationNodeStateMachine::get_nodes_with_transitions_to(cons
 	}
 	return result;
 }
+void AnimationNodeStateMachine::capture_state(ProcessState *p_state, Array &cs) {
+	process_state = p_state;
+	Ref<AnimationNodeStateMachinePlayback> playback = get_parameter(StringName("playback"));
+
+	if (playback.is_valid()) {
+		StringName current_node_name = playback->get_current_node();
+
+		if (current_node_name != StringName() && has_node(current_node_name)) {
+			Ref<AnimationNode> current_node = get_node(current_node_name);
+
+			if (current_node.is_valid()) {
+				current_node.ptr()->capture_state(p_state, cs);
+			}
+		}
+
+		StringName fading_from_name = playback->get_fading_from_node();
+		if (fading_from_name != StringName() && has_node(fading_from_name)) {
+			Ref<AnimationNode> fading_node = get_node(fading_from_name);
+			if (fading_node.is_valid()) {
+				fading_node.ptr()->capture_state(p_state, cs);
+			}
+			//only make a blend2 command IF its currently fading form something
+			//if not who gives shit
+			//Array ACommand;
+			cs.push_back(CMD_BLEND2);
+			cs.push_back(get_path().hash());
+			float fade_blend = MIN(1.0, playback->fading_pos / playback->fading_time);
+			cs.push_back(fade_blend);
+			//cs.push_back(ACommand);
+		}
+	}
+	process_state = nullptr;
+}
 
 AnimationNodeStateMachine::AnimationNodeStateMachine() {
 	Ref<AnimationNodeStartState> s;

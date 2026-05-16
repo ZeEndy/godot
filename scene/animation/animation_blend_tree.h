@@ -91,7 +91,25 @@ public:
 
 	void set_loop_mode(Animation::LoopMode p_loop_mode);
 	Animation::LoopMode get_loop_mode() const;
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override {
+		/*
+		And now, the end is near
+		And so I face the final curtain
+		My friend, I'll say it clear
+		I'll state my case, of which I'm certain
+		I've lived a life that's full
+		I traveled each and every node
+		And more, much more than this
+		I captured it my way
+		*/
+		process_state = p_state;
+		NodeTimeInfo nti = get_node_time_info();
+		cs.push_back(CMD_SAMPLE);
+		cs.push_back(get_path().hash());
+		cs.push_back(nti.position);
+		//cs.push_back(ACommand);
+		process_state = nullptr;
+	}
 	AnimationNodeAnimation();
 
 protected:
@@ -196,7 +214,7 @@ public:
 
 	virtual bool has_filter() const override;
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override;
 	AnimationNodeOneShot();
 };
 
@@ -216,7 +234,26 @@ public:
 
 	virtual bool has_filter() const override;
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
+	virtual void capture_state(ProcessState *p_state, Array &cs) override {
+		process_state = p_state;
+		Array ACommand;
+		ACommand.push_back(CMD_ADD2);
+		ACommand.push_back(get_path().hash());
+		float blend = get_parameter(add_amount);
+		ACommand.push_back(blend);
+		process_state = nullptr;
+		bool push_both = false;
+		if (is_filter_enabled()) {
+			push_both = true;
+		}
 
+		Vector<AnimationNode *> next_in_firing_line = get_next_connections();
+		next_in_firing_line[0]->capture_state(p_state, cs);
+		if (!Math::is_zero_approx(blend)) {
+			next_in_firing_line[1]->capture_state(p_state, cs);
+			cs.append_array(ACommand);
+		}
+	}
 	AnimationNodeAdd2();
 };
 
@@ -248,7 +285,39 @@ public:
 
 	virtual String get_caption() const override;
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
+	//blend2 capture
+	virtual void capture_state(ProcessState *p_state, Array &cs) override {
+		process_state = p_state;
+		Array ACommand;
+		ACommand.push_back(CMD_BLEND2);
+		ACommand.push_back(get_path().hash());
+		float blend = get_parameter(blend_amount);
+		ACommand.push_back(blend);
+		process_state = nullptr;
+		bool push_both = false;
+		if (is_filter_enabled()) {
+			push_both = true;
+		}
 
+		Vector<AnimationNode *> next_in_firing_line = get_next_connections();
+		if (push_both) {
+			next_in_firing_line[0]->capture_state(p_state, cs);
+			if (!Math::is_zero_approx(blend)) {
+				next_in_firing_line[1]->capture_state(p_state, cs);
+			}
+			cs.append_array(ACommand);
+		} else {
+			if (Math::is_zero_approx(blend)) {
+				next_in_firing_line[0]->capture_state(p_state, cs);
+			} else if (Math::is_equal_approx(blend, 1.f)) {
+				next_in_firing_line[1]->capture_state(p_state, cs);
+			} else {
+				next_in_firing_line[0]->capture_state(p_state, cs);
+				next_in_firing_line[1]->capture_state(p_state, cs);
+				cs.append_array(ACommand);
+			}
+		}
+	}
 	virtual bool has_filter() const override;
 	AnimationNodeBlend2();
 };
@@ -281,7 +350,17 @@ public:
 
 	virtual bool has_filter() const override;
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override {
+		Vector<AnimationNode *> next_in_firing_line = get_next_connections();
+		for (AnimationNode *AnimNode : next_in_firing_line) {
+			AnimNode->capture_state(p_state, cs);
+		}
+		process_state = p_state;
+		cs.push_back(CMD_ADD2);
+		cs.push_back(get_path().hash());
+		cs.push_back(-(float)get_parameter(sub_amount));
+		process_state = nullptr;
+	}
 	AnimationNodeSub2();
 };
 
@@ -293,7 +372,6 @@ class AnimationNodeTimeScale : public AnimationNode {
 public:
 	virtual void get_parameter_list(List<PropertyInfo> *r_list) const override;
 	virtual Variant get_parameter_default_value(const StringName &p_parameter) const override;
-
 	virtual String get_caption() const override;
 
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
@@ -384,7 +462,7 @@ public:
 	bool is_allow_transition_to_self() const;
 
 	virtual NodeTimeInfo _process(const AnimationMixer::PlaybackInfo p_playback_info, bool p_test_only = false) override;
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override;
 	AnimationNodeTransition();
 };
 
@@ -478,7 +556,21 @@ public:
 #ifdef TOOLS_ENABLED
 	virtual void get_argument_options(const StringName &p_function, int p_idx, List<String> *r_options) const override;
 #endif
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override {
+		if (!nodes.has("output")) {
+			return;
+		}
+		const Node &output_node_struct = nodes["output"];
+		if (output_node_struct.connections.size() > 0) {
+			StringName source_node_name = output_node_struct.connections[0];
+			if (source_node_name != StringName()) {
+				Ref<AnimationNode> input_node = get_node(source_node_name);
+				if (input_node.is_valid()) {
+					input_node.ptr()->capture_state(p_state, cs);
+				}
+			}
+		}
+	}
 	AnimationNodeBlendTree();
 	~AnimationNodeBlendTree();
 };

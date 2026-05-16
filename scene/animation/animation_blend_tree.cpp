@@ -257,7 +257,7 @@ AnimationNode::NodeTimeInfo AnimationNodeAnimation::_process(const AnimationMixe
 			if (is_started) {
 				process_state->tree->call_deferred(SNAME("emit_signal"), SceneStringName(animation_started), animation);
 			}
-			// Finished.
+
 			if (Animation::is_less_approx(prev_playback_time, anim_size) && Animation::is_greater_or_equal_approx(cur_playback_time, anim_size)) {
 				cur_playback_time = anim_size;
 				process_state->tree->call_deferred(SNAME("emit_signal"), SceneStringName(animation_finished), animation);
@@ -731,6 +731,98 @@ AnimationNode::NodeTimeInfo AnimationNodeOneShot::_process(const AnimationMixer:
 	set_parameter(fade_out_remaining, cur_fade_out_remaining);
 
 	return cur_internal_active ? os_nti : main_nti;
+}
+
+void AnimationNodeOneShot::capture_state(ProcessState *p_state, Array &cs) {
+	process_state = p_state;
+
+	AnimationNodeBlendTree *blend_tree = Object::cast_to<AnimationNodeBlendTree>(node_state.parent);
+	if (!blend_tree) {
+		process_state = nullptr;
+		return;
+	}
+
+	StringName my_name = blend_tree->get_node_name(Ref<AnimationNode>(this));
+	node_state.connections = blend_tree->get_node_connection_array(my_name);
+
+	bool cur_active = get_parameter(active);
+	bool cur_internal_active = get_parameter(internal_active);
+	double cur_fade_in = get_parameter(fade_in_remaining);
+	double cur_fade_out = get_parameter(fade_out_remaining);
+
+	bool is_shooting = cur_active || cur_internal_active;
+	bool is_fading_out = (cur_active == true && cur_internal_active == false);
+
+	double blend = 1.0;
+
+	if (!is_shooting) {
+		blend = 0.0;
+	} else {
+		if (cur_fade_in > 0.0) {
+			if (fade_in > 0.0) {
+				blend = (fade_in - cur_fade_in) / fade_in;
+				if (fade_in_curve.is_valid()) {
+					blend = fade_in_curve->sample(blend);
+				}
+			} else {
+				blend = 0.0;
+			}
+		} else if (is_fading_out) {
+			if (fade_out > 0.0) {
+				blend = cur_fade_out / fade_out;
+				if (fade_out_curve.is_valid()) {
+					blend = 1.0 - fade_out_curve->sample(1.0 - blend);
+				}
+			} else {
+				blend = 0.0;
+			}
+		}
+	}
+	bool push_base = false;
+	bool push_shot = false;
+	bool push_cmd = false;
+
+	if (Math::is_zero_approx(blend)) {
+		push_base = true;
+	} else if (mix == MIX_MODE_BLEND && !is_filter_enabled() && Math::is_equal_approx(blend, 1.0)) {
+		push_shot = true;
+	} else {
+		push_base = true;
+		push_shot = true;
+		push_cmd = true;
+	}
+
+	if (push_base && node_state.connections.size() > 0) {
+		StringName base_name = node_state.connections[0];
+		if (base_name != StringName()) {
+			Ref<AnimationNode> base_node = blend_tree->get_node(base_name);
+			if (base_node.is_valid()) {
+				base_node.ptr()->capture_state(p_state, cs);
+			}
+		}
+	}
+
+	if (push_shot && node_state.connections.size() > 1) {
+		StringName shot_name = node_state.connections[1];
+		if (shot_name != StringName()) {
+			Ref<AnimationNode> shot_node = blend_tree->get_node(shot_name);
+			if (shot_node.is_valid()) {
+				shot_node.ptr()->capture_state(p_state, cs);
+			}
+		}
+	}
+
+	if (push_cmd) {
+		if (mix == MIX_MODE_ADD) {
+			cs.push_back(CMD_ADD2);
+		} else {
+			cs.push_back(CMD_BLEND2);
+		}
+		cs.push_back(get_path().hash());
+		cs.push_back(blend);
+	}
+
+	process_state = nullptr;
 }
 
 void AnimationNodeOneShot::_bind_methods() {
@@ -1428,6 +1520,55 @@ AnimationNode::NodeTimeInfo AnimationNodeTransition::_process(const AnimationMix
 	set_parameter(prev_xfading, cur_prev_xfading);
 
 	return cur_nti;
+}
+
+void AnimationNodeTransition::capture_state(ProcessState *p_state, Array &cs) {
+	process_state = p_state;
+
+	AnimationNodeBlendTree *blend_tree = Object::cast_to<AnimationNodeBlendTree>(node_state.parent);
+	if (!blend_tree) {
+		process_state = nullptr;
+		return;
+	}
+	StringName my_name = blend_tree->get_node_name(Ref<AnimationNode>(this));
+	node_state.connections = blend_tree->get_node_connection_array(my_name);
+
+	int cur_idx = get_parameter(current_index);
+	int prv_idx = get_parameter(prev_index);
+	double prv_xfade = get_parameter(prev_xfading);
+
+	if (cur_idx >= 0 && cur_idx < node_state.connections.size()) {
+		StringName node_name = node_state.connections[cur_idx];
+		if (node_name != StringName()) {
+			Ref<AnimationNode> node = blend_tree->get_node(node_name);
+			if (node.is_valid()) {
+				node.ptr()->capture_state(p_state, cs);
+			}
+		}
+	}
+	if (prv_idx >= 0 && prv_idx < node_state.connections.size() && prv_xfade > 0) {
+		StringName node_name = node_state.connections[prv_idx];
+		if (node_name != StringName()) {
+			Ref<AnimationNode> node = blend_tree->get_node(node_name);
+			if (node.is_valid()) {
+				node.ptr()->capture_state(p_state, cs);
+			}
+		}
+
+		double blend = 0.0;
+		if (xfade_time > 0) {
+			blend = prv_xfade / xfade_time;
+			if (xfade_curve.is_valid()) {
+				blend = xfade_curve->sample(blend);
+			}
+		}
+
+		cs.push_back(CMD_BLEND2);
+		cs.push_back(get_path().hash());
+		cs.push_back(blend);
+	}
+
+	process_state = nullptr;
 }
 
 void AnimationNodeTransition::_get_property_list(List<PropertyInfo> *p_list) const {

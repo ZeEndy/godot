@@ -592,6 +592,117 @@ AnimationNode::NodeTimeInfo AnimationNodeBlendSpace2D::_process(const AnimationM
 	return mind;
 }
 
+void AnimationNodeBlendSpace2D::capture_state(ProcessState *p_state, Array &cs) {
+	process_state = p_state;
+	_update_triangles();
+
+	if (!blend_points_used) {
+		return;
+	}
+
+	Vector2 blend_pos = get_parameter(blend_position);
+	float blend_weights[3] = { 0, 0, 0 };
+	int triangle_points[3] = { -1, -1, -1 };
+
+	if (blend_mode == BLEND_MODE_INTERPOLATED) {
+		if (triangles.is_empty()) {
+			return;
+		}
+
+		int blend_triangle = -1;
+		Vector2 best_point;
+		bool first = true;
+
+		for (int i = 0; i < triangles.size(); i++) {
+			Vector2 pts[3];
+			for (int j = 0; j < 3; j++) {
+				pts[j] = get_blend_point_position(get_triangle_point(i, j));
+			}
+
+			if (Geometry2D::is_point_in_triangle(blend_pos, pts[0], pts[1], pts[2])) {
+				blend_triangle = i;
+				_blend_triangle(blend_pos, pts, blend_weights);
+				break;
+			}
+
+			for (int j = 0; j < 3; j++) {
+				const Vector2 segment_a = pts[j];
+				const Vector2 segment_b = pts[(j + 1) % 3];
+				Vector2 closest2 = Geometry2D::get_closest_point_to_segment(blend_pos, segment_a, segment_b);
+				if (first || closest2.distance_to(blend_pos) < best_point.distance_to(blend_pos)) {
+					best_point = closest2;
+					blend_triangle = i;
+					first = false;
+					const real_t d = segment_a.distance_to(segment_b);
+					if (d == 0.0) {
+						blend_weights[j] = 1.0;
+						blend_weights[(j + 1) % 3] = 0.0;
+						blend_weights[(j + 2) % 3] = 0.0;
+					} else {
+						const real_t c = segment_a.distance_to(closest2) / d;
+						blend_weights[j] = 1.0 - c;
+						blend_weights[(j + 1) % 3] = c;
+						blend_weights[(j + 2) % 3] = 0.0;
+					}
+				}
+			}
+		}
+
+		if (blend_triangle != -1) {
+			for (int j = 0; j < 3; j++) {
+				triangle_points[j] = get_triangle_point(blend_triangle, j);
+			}
+		}
+	} else {
+		int new_closest = -1;
+		float new_closest_dist = 1e20;
+		for (int i = 0; i < blend_points_used; i++) {
+			float d = blend_points[i].position.distance_squared_to(blend_pos);
+			if (d < new_closest_dist) {
+				new_closest = i;
+				new_closest_dist = d;
+			}
+		}
+		if (new_closest != -1) {
+			triangle_points[0] = new_closest;
+			blend_weights[0] = 1.0f;
+		}
+	}
+
+	struct ActiveNode {
+		int idx;
+		float weight;
+	};
+	Vector<ActiveNode> actives;
+	for (int i = 0; i < 3; i++) {
+		if (triangle_points[i] != -1 && blend_weights[i] > 0.001f) {
+			actives.push_back({ triangle_points[i], blend_weights[i] });
+		}
+	}
+
+	if (actives.size() == 0) {
+		return;
+	}
+
+	blend_points[actives[0].idx].node->capture_state(p_state, cs);
+
+	float current_total_weight = actives[0].weight;
+
+	for (int i = 1; i < actives.size(); i++) {
+		blend_points[actives[i].idx].node->capture_state(p_state, cs);
+
+		//blend set ratiooooo
+		float total_next = current_total_weight + actives[i].weight;
+		float ratio = actives[i].weight / total_next;
+
+		cs.push_back(CMD_BLEND2);
+		cs.push_back(get_path().hash());
+		cs.push_back(ratio);
+
+		current_total_weight = total_next;
+	}
+	process_state = nullptr;
+}
 String AnimationNodeBlendSpace2D::get_caption() const {
 	return "BlendSpace2D";
 }

@@ -1009,14 +1009,14 @@ bool AnimationMixer::_update_caches() {
 void AnimationMixer::_process_animation(double p_delta, bool p_update_only) {
 	_blend_init();
 	if (cache_valid && _blend_pre_process(p_delta, track_count, track_map)) {
-		if (is_driven_by_capture) {
+		/*if (is_driven_by_capture) {
 			apply_current_capture(p_delta);
-		}
+		}*/
 		_blend_capture(p_delta);
 		_blend_calc_total_weight();
-		if (!is_driven_by_capture) {
+		/*if (!is_driven_by_capture) {
 			_capture_current_state();
-		}
+		}*/
 		_blend_process(p_delta, p_update_only);
 		clear_animation_instances();
 		_blend_apply();
@@ -2826,7 +2826,7 @@ void AnimationMixer::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "is_driven_by_capture"), "set_is_driven_by_capture", "get_is_driven_by_capture");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "current_capture"), "set_current_capture", "get_current_capture");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "current_capture", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR), "set_current_capture", "get_current_capture");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "deterministic"), "set_deterministic", "is_deterministic");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reset_on_save", PROPERTY_HINT_NONE, ""), "set_reset_on_save_enabled", "is_reset_on_save_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "root_node"), "set_root_node", "get_root_node");

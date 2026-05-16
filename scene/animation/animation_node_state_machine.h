@@ -223,7 +223,7 @@ public:
 
 	Vector<StringName> get_nodes_with_transitions_from(const StringName &p_node) const;
 	Vector<StringName> get_nodes_with_transitions_to(const StringName &p_node) const;
-
+	virtual void capture_state(ProcessState *p_state, Array &cs) override;
 	AnimationNodeStateMachine();
 };
 

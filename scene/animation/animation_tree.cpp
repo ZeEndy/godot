@@ -173,7 +173,6 @@ AnimationNode::NodeTimeInfo AnimationNode::blend_input(int p_input, AnimationMix
 	// Update connections.
 	StringName current_name = blend_tree->get_node_name(Ref<AnimationNode>(this));
 	node_state.connections = blend_tree->get_node_connection_array(current_name);
-
 	// Get node which is connected input port.
 	StringName node_name = node_state.connections[p_input];
 	if (!blend_tree->has_node(node_name)) {
@@ -312,12 +311,18 @@ AnimationNode::NodeTimeInfo AnimationNode::_blend_node(Ref<AnimationNode> p_node
 	// that a synced AnimationNodeSync exists under the un-synced AnimationNodeSync.
 	p_node->set_node_state_base_path(new_path);
 	p_node->node_state.parent = new_parent;
-	p_playback_info.hash = p_node.hash();
+	float old_weight = p_playback_info.weight;
+
+	NodeTimeInfo nti;
 	if (!p_playback_info.seeked && !p_sync && !any_valid) {
 		p_playback_info.delta = 0.0;
-		return p_node->_pre_process(process_state, p_playback_info, p_test_only);
+		nti = p_node->_pre_process(process_state, p_playback_info, p_test_only);
+	} else {
+		nti = p_node->_pre_process(process_state, p_playback_info, p_test_only);
 	}
-	return p_node->_pre_process(process_state, p_playback_info, p_test_only);
+	p_playback_info.hash = p_node.hash();
+	//print_line(vformat(get_class() + " weight :%f", p_playback_info.weight));
+	return nti;
 }
 
 String AnimationNode::get_caption() const {
@@ -398,6 +403,26 @@ AnimationNode::NodeTimeInfo AnimationNode::_process(const AnimationMixer::Playba
 	NodeTimeInfo nti;
 	nti.delta = r_ret;
 	return nti;
+}
+
+Vector<AnimationNode *> AnimationNode::get_next_connections() {
+	//godot has hands woops still eat shit and live bitch
+	Vector<AnimationNode *> next_nodes;
+	AnimationNodeBlendTree *blend_tree = Object::cast_to<AnimationNodeBlendTree>(node_state.parent);
+	if (!blend_tree) {
+		return next_nodes;
+	}
+	for (int i = 0; i < get_input_count(); i++) {
+		StringName node_name = node_state.connections[i];
+		if (node_name == StringName()) {
+			continue;
+		}
+		Ref<AnimationNode> node_ref = blend_tree->get_node(node_name);
+		if (node_ref.is_valid()) {
+			next_nodes.push_back(node_ref.ptr());
+		}
+	}
+	return next_nodes;
 }
 
 void AnimationNode::set_filter_path(const NodePath &p_path, bool p_enable) {
@@ -638,14 +663,246 @@ Ref<AnimationRootNode> AnimationTree::get_root_animation_node() const {
 	return root_animation_node;
 }
 
+void AnimationTree::apply_capture(int p_track_count, AnimationNode::ProcessState *p_state) {
+	if (current_capture.is_empty()) {
+		return;
+	}
+
+	const AHashMap<NodePath, int> *btrack_map = process_state.track_map;
+	if (!btrack_map) {
+		return;
+	}
+	int t_count = btrack_map->size();
+
+	struct Capted {
+		StringName anim_name;
+		double time;
+		double end;
+		Vector<float> track_weights;
+	};
+
+	Vector<Vector<Capted>> stack;
+	int size = current_capture.size();
+	if (size < 3) {
+		WARN_PRINT("Apply Capture: Capture total less than minimum, data malformed");
+	}
+	for (int i = 0; i < size; i += 3) {
+		if (i + 2 > size) {
+			WARN_PRINT("Apply Capture: Skipping malformed command (current command + 2 > size");
+			continue;
+		}
+
+		AnimationNode::AnimCommand type = static_cast<AnimationNode::AnimCommand>((int)current_capture[i]);
+		uint32_t path = current_capture[i + 1];
+		double value = current_capture[i + 2];
+
+		switch (type) {
+			case AnimationNode::CMD_SAMPLE: {
+				AnimationNodeAnimation *anode = Object::cast_to<AnimationNodeAnimation>(hash_to_node[path]);
+				StringName anim_name = anode ? anode->get_animation() : StringName();
+				anode->process_state = p_state;
+				Vector<Capted> leaf_list;
+				Capted c;
+				c.anim_name = anim_name;
+
+				if (anode && p_state->tree->has_animation(anim_name)) {
+					Ref<Animation> anim = p_state->tree->get_animation(anim_name);
+
+					double anim_size = anim.is_valid() ? (double)anim->get_length() : 0.0;
+					double cur_time = value;
+					double cur_len = anim_size;
+					Animation::LoopMode cur_loop_mode = anim->get_loop_mode();
+					if (anode->is_using_custom_timeline()) {
+						cur_len = anode->get_timeline_length();
+						cur_loop_mode = anode->get_loop_mode();
+					}
+
+					if (cur_loop_mode != Animation::LOOP_NONE) {
+						if (cur_loop_mode == Animation::LOOP_LINEAR) {
+							if (!Math::is_zero_approx(cur_len)) {
+								cur_time = Math::fposmod(cur_time, cur_len);
+							}
+						} else {
+							if (!Math::is_zero_approx(cur_len)) {
+								cur_time = Math::pingpong(cur_time, cur_len);
+							}
+						}
+					} else {
+						if (Animation::is_less_approx(cur_time, 0)) {
+							cur_time = 0;
+						} else if (Animation::is_greater_approx(cur_time, cur_len)) {
+							cur_time = cur_len;
+						}
+					}
+					double cur_playback_time = cur_time + anode->get_start_offset();
+					if (anode->is_stretching_time_scale()) {
+						if (!Math::is_zero_approx(cur_len)) {
+							double mlt = anim_size / cur_len;
+							cur_playback_time *= mlt;
+						}
+					}
+
+					if (cur_loop_mode == Animation::LOOP_LINEAR) {
+						if (!Math::is_zero_approx(anim_size)) {
+							cur_playback_time = Math::fposmod(cur_playback_time, anim_size);
+						}
+					} else if (cur_loop_mode == Animation::LOOP_PINGPONG) {
+						if (!Math::is_zero_approx(anim_size)) {
+							cur_playback_time = Math::pingpong(cur_playback_time, anim_size);
+						}
+					} else {
+						if (Animation::is_less_approx(cur_playback_time, 0)) {
+							cur_playback_time = 0;
+						} else if (Animation::is_greater_approx(cur_playback_time, anim_size)) {
+							cur_playback_time = anim_size;
+						}
+					}
+
+					if (anode->get_play_mode() == AnimationNodeAnimation::PLAY_MODE_FORWARD) {
+						c.time = cur_playback_time;
+					} else {
+						c.time = anim_size - cur_playback_time;
+					}
+
+					c.end = cur_len;
+
+				} else {
+					c.time = value;
+					c.end = 0;
+				}
+
+				c.track_weights.resize(t_count);
+				float *w_ptr = c.track_weights.ptrw();
+				for (int j = 0; j < t_count; j++) {
+					w_ptr[j] = 1.0f;
+				}
+				anode->process_state = nullptr;
+				leaf_list.push_back(c);
+				stack.push_back(leaf_list);
+			} break;
+			case AnimationNode::CMD_BLEND2:
+			case AnimationNode::CMD_ADD2: {
+				if (stack.size() < 2) {
+					continue;
+				}
+
+				Vector<Capted> right_side = stack[stack.size() - 1];
+				Vector<Capted> left_side = stack[stack.size() - 2];
+				stack.resize(stack.size() - 2);
+
+				AnimationNode *blend_node = hash_to_node[path];
+				double blend_amount = value;
+
+				Vector<float> filter_mask;
+				bool has_filter = blend_node && blend_node->is_filter_enabled();
+
+				if (has_filter) {
+					filter_mask.resize(t_count);
+					float *mask_ptr = filter_mask.ptrw();
+					for (int j = 0; j < t_count; j++) {
+						mask_ptr[j] = 0.0f;
+					}
+
+					for (const KeyValue<NodePath, int> &E : *btrack_map) {
+						if (blend_node->is_path_filtered(E.key)) {
+							mask_ptr[E.value] = 1.0f;
+						}
+					}
+				}
+
+				Vector<Capted> result;
+
+				if (type == AnimationNode::CMD_BLEND2) {
+					//PROCESS LEFT
+					for (int j = 0; j < left_side.size(); j++) {
+						Capted c = left_side[j];
+						float *tw = c.track_weights.ptrw();
+
+						for (int k = 0; k < t_count; k++) {
+							float node_w = 1.0f - (float)blend_amount;
+							tw[k] *= calculate_capture_weight(k, node_w, has_filter, AnimationNode::FILTER_BLEND, filter_mask.ptr());
+						}
+						result.push_back(c);
+					}
+
+					// PROCESS RIGHT
+					for (int j = 0; j < right_side.size(); j++) {
+						Capted c = right_side[j];
+						float *tw = c.track_weights.ptrw();
+
+						for (int k = 0; k < t_count; k++) {
+							float node_w = (float)blend_amount;
+							tw[k] *= calculate_capture_weight(k, node_w, has_filter, AnimationNode::FILTER_PASS, filter_mask.ptr());
+						}
+						result.push_back(c);
+					}
+				} else if (type == AnimationNode::CMD_ADD2) {
+					// PROCESS LEFT
+					for (int j = 0; j < left_side.size(); j++) {
+						result.push_back(left_side[j]);
+					}
+
+					// PROCESS RIGHT
+					for (int j = 0; j < right_side.size(); j++) {
+						Capted c = right_side[j];
+						float *tw = c.track_weights.ptrw();
+
+						for (int k = 0; k < t_count; k++) {
+							float node_w = (float)blend_amount;
+							tw[k] *= calculate_capture_weight(k, node_w, has_filter, AnimationNode::FILTER_PASS, filter_mask.ptr());
+						}
+						result.push_back(c);
+					}
+				}
+
+				stack.push_back(result);
+			} break;
+		}
+	}
+
+	if (stack.is_empty()) {
+		print_line("Apply Capture: Stack is empty exiting early");
+		return;
+	}
+
+	Vector<Capted> final_anims = stack[0];
+	for (int i = 0; i < final_anims.size(); i++) {
+		AnimationMixer::PlaybackInfo pi;
+		pi.time = final_anims[i].time;
+		pi.end = final_anims[i].end;
+		pi.weight = 1.0;
+		pi.track_weights = final_anims[i].track_weights;
+		make_animation_instance(final_anims[i].anim_name, pi);
+	}
+}
+
+float AnimationTree::calculate_capture_weight(int p_idx, float p_node_weight, bool p_has_filter, AnimationNode::FilterAction p_mode, const float *p_mask) {
+	if (!p_has_filter || p_mode == AnimationNode::FILTER_IGNORE) {
+		return p_node_weight;
+	}
+
+	bool in_filter = p_mask[p_idx] > 0;
+
+	switch (p_mode) {
+		case AnimationNode::FILTER_PASS:
+			return in_filter ? p_node_weight : 0.0f;
+		case AnimationNode::FILTER_STOP:
+			return in_filter ? 0.0f : p_node_weight;
+		case AnimationNode::FILTER_BLEND:
+			return in_filter ? p_node_weight : 1.0f;
+		default:
+			return p_node_weight;
+	}
+}
+
 bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const AHashMap<NodePath, int> &p_track_map) {
 	_update_properties(); // If properties need updating, update them.
+	if (!is_driven_by_capture) {
+		current_capture.clear();
+	}
 
 	if (root_animation_node.is_null()) {
 		return false;
-	}
-	if (is_driven_by_capture) {
-		return true;
 	}
 
 	{ // Setup.
@@ -669,6 +926,10 @@ bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const 
 		root_animation_node->node_state.parent = nullptr;
 	}
 
+	if (is_driven_by_capture) {
+		apply_capture(p_track_count, &process_state);
+		return true;
+	}
 	// Process.
 	{
 		PlaybackInfo pi;
@@ -689,7 +950,7 @@ bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const 
 	if (!process_state.valid) {
 		return false; // State is not valid, abort process.
 	}
-
+	root_animation_node->capture_state(&process_state, current_capture);
 	return true;
 }
 
@@ -809,7 +1070,7 @@ void AnimationTree::_update_properties_for_node(const String &p_base_path, Ref<A
 	p_node->make_cache_dirty();
 	List<AnimationNode::ChildNode> children;
 	p_node->get_child_nodes(&children);
-
+	hash_to_node[p_node->get_path().hash()] = p_node.ptr();
 	for (const AnimationNode::ChildNode &E : children) {
 		_update_properties_for_node(p_base_path + E.name + "/", E.node);
 	}
